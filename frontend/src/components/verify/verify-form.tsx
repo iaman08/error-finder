@@ -1,6 +1,6 @@
 'use client';
 
-import { Sparkles } from 'lucide-react';
+import { Eraser, Sparkles } from 'lucide-react';
 import { useEffect, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,6 +20,8 @@ interface VerifyFormProps {
   isSubmitting: boolean;
   /** Optional initial form values. When changed, re-mount the form with a `key`. */
   defaults?: VerifyRequest;
+  /** Fired after the user clicks Clear so the parent can also reset its result/error state. */
+  onClear?: () => void;
 }
 
 interface FormState {
@@ -46,9 +48,15 @@ const toFormState = (defaults: VerifyRequest | undefined): FormState =>
       }
     : EMPTY_STATE;
 
-export const VerifyForm = ({ onSubmit, isSubmitting, defaults }: VerifyFormProps) => {
+export const VerifyForm = ({ onSubmit, isSubmitting, defaults, onClear }: VerifyFormProps) => {
   const [form, setForm] = useState<FormState>(() => toFormState(defaults));
   const [errors, setErrors] = useState<Partial<Record<keyof VerifyRequest, string>>>({});
+
+  const handleClear = () => {
+    setForm(EMPTY_STATE);
+    setErrors({});
+    onClear?.();
+  };
 
   useEffect(() => {
     setErrors({});
@@ -181,10 +189,22 @@ export const VerifyForm = ({ onSubmit, isSubmitting, defaults }: VerifyFormProps
             <p className="text-[11px] text-muted-foreground">
               Press <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">⌘ Enter</kbd> to submit.
             </p>
-            <Button type="submit" disabled={isSubmitting} className="gap-1.5">
-              <Sparkles className="h-4 w-4" aria-hidden />
-              {isSubmitting ? 'Verifying…' : 'Verify response'}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={handleClear}
+                disabled={isSubmitting || (form.userInput === '' && form.modelOutput === '')}
+                className="gap-1.5"
+              >
+                <Eraser className="h-4 w-4" aria-hidden />
+                Clear
+              </Button>
+              <Button type="submit" disabled={isSubmitting} className="gap-1.5">
+                <Sparkles className="h-4 w-4" aria-hidden />
+                {isSubmitting ? 'Verifying…' : 'Verify response'}
+              </Button>
+            </div>
           </div>
         </form>
       </CardContent>

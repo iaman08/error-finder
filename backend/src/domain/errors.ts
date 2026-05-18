@@ -6,7 +6,10 @@ export type ErrorCode =
   | 'PIPELINE_ERROR'
   | 'DB_ERROR'
   | 'NOT_FOUND'
-  | 'INTERNAL_ERROR';
+  | 'INTERNAL_ERROR'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
+  | 'CONFLICT';
 
 export class AppError extends Error {
   public readonly code: ErrorCode;
@@ -32,8 +35,14 @@ const defaultStatusForCode = (code: ErrorCode): number => {
   switch (code) {
     case 'VALIDATION_ERROR':
       return 400;
+    case 'UNAUTHORIZED':
+      return 401;
+    case 'FORBIDDEN':
+      return 403;
     case 'NOT_FOUND':
       return 404;
+    case 'CONFLICT':
+      return 409;
     case 'LLM_ERROR':
     case 'RETRIEVAL_ERROR':
       return 502;

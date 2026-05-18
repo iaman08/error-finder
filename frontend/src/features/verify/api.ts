@@ -2,13 +2,17 @@ import { env } from '@/lib/env';
 import {
   apiErrorSchema,
   runDocSchema,
+  submitAcceptedSchema,
   verifyResponseSchema,
   type RunDoc,
+  type SubmitAccepted,
   type VerifyRequest,
   type VerifyResponse,
 } from '@/features/verify/schemas';
 
-const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_TIMEOUT_MS = 30_000;
+const POLL_INTERVAL_MS = 2_500;
+const POLL_MAX_WAIT_MS = 10 * 60_000;
 
 export class ApiError extends Error {
   public readonly code: string;
@@ -113,18 +117,18 @@ const safeJsonParse = (raw: string): unknown => {
 };
 
 export const verifyApi = {
-  async submit(input: VerifyRequest, signal?: AbortSignal): Promise<VerifyResponse> {
+  async submit(input: VerifyRequest, signal?: AbortSignal): Promise<SubmitAccepted> {
     const raw = await request<unknown>({
       method: 'POST',
       path: '/v1/verify',
       body: input,
       ...(signal ? { signal } : {}),
     });
-    const parsed = verifyResponseSchema.safeParse(raw);
+    const parsed = submitAcceptedSchema.safeParse(raw);
     if (!parsed.success) {
       throw new ApiError({
         code: 'INVALID_RESPONSE',
-        message: 'Backend returned an unexpected response shape',
+        message: 'Backend returned an unexpected accept-response shape',
         statusCode: 502,
       });
     }
@@ -147,4 +151,89 @@ export const verifyApi = {
     }
     return parsed.data;
   },
+
+  async pollUntilDone(correlationId: string, signal?: AbortSignal): Promise<VerifyResponse> {
+    const deadline = Date.now() + POLL_MAX_WAIT_MS;
+    while (true) {
+      if (signal?.aborted) {
+        throw new ApiError({
+          code: 'TIMEOUT',
+          message: 'Polling was aborted',
+          statusCode: 0,
+          correlationId,
+        });
+      }
+
+      const doc = await verifyApi.getRun(correlationId, signal);
+
+      if (doc.status === 'completed') {
+        const parsed = verifyResponseSchema.safeParse(runDocToResponse(doc));
+        if (!parsed.success) {
+          throw new ApiError({
+            code: 'INVALID_RESPONSE',
+            message: 'Completed run is missing required fields',
+            statusCode: 502,
+            correlationId,
+          });
+        }
+        return parsed.data;
+      }
+
+      if (doc.status === 'failed') {
+        throw new ApiError({
+          code: 'PIPELINE_FAILED',
+          message: doc.error ?? 'Verification pipeline failed',
+          statusCode: 500,
+          correlationId,
+        });
+      }
+
+      if (Date.now() >= deadline) {
+        throw new ApiError({
+          code: 'TIMEOUT',
+          message: 'Verification did not complete within the polling window',
+          statusCode: 504,
+          correlationId,
+        });
+      }
+
+      await delay(POLL_INTERVAL_MS, signal);
+    }
+  },
 };
+
+const runDocToResponse = (doc: RunDoc): unknown => ({
+  correlationId: doc.correlationId,
+  detectedDomain: doc.detectedDomain,
+  mode: doc.input.mode,
+  claims: doc.claims,
+  verdicts: doc.verdicts,
+  compliance: doc.compliance,
+  overallStatus: doc.overallStatus,
+  correctedOutput: doc.correctedOutput,
+  timings: doc.timings,
+  warnings: doc.warnings,
+  injection: doc.injection,
+});
+
+const delay = (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(
+        new ApiError({
+          code: 'TIMEOUT',
+          message: 'Polling was aborted',
+          statusCode: 0,
+        }),
+      );
+    };
+    if (signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
+  });

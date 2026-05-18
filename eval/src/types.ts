@@ -135,8 +135,42 @@ export const verifyResponseSchema = z.object({
   injection: injectionSchema.default({ suspected: false, preScanMatches: [], llmSelfReports: 0 }),
 });
 
+export const RUN_STATUSES = ['pending', 'completed', 'failed'] as const;
+export type RunStatus = (typeof RUN_STATUSES)[number];
+
+export const submitAcceptedSchema = z.object({
+  correlationId: z.string(),
+  status: z.enum(RUN_STATUSES),
+});
+
+export const runDocSchema = z.object({
+  correlationId: z.string(),
+  status: z.enum(RUN_STATUSES),
+  input: z.object({
+    userInput: z.string(),
+    modelOutput: z.string(),
+    mode: z.enum(RETRIEVAL_MODES),
+  }),
+  detectedDomain: z.string().optional(),
+  claims: z.array(claimSchema).default([]),
+  verdicts: z.array(claimVerdictSchema).default([]),
+  compliance: complianceSchema.optional(),
+  overallStatus: z.enum(VERDICT_STATUSES).optional(),
+  correctedOutput: z.string().optional(),
+  timings: z
+    .object({
+      totalMs: z.number(),
+      perStage: z.record(z.string(), z.number()).default({}),
+    })
+    .optional(),
+  warnings: z.array(z.string()).default([]),
+  injection: injectionSchema.default({ suspected: false, preScanMatches: [], llmSelfReports: 0 }),
+  error: z.string().optional(),
+});
+
 export type VerifyResponse = z.infer<typeof verifyResponseSchema>;
 export type ClaimVerdict = z.infer<typeof claimVerdictSchema>;
+export type RunDoc = z.infer<typeof runDocSchema>;
 
 // ----- Scoring result types -----
 

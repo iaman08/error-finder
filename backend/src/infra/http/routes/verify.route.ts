@@ -24,15 +24,19 @@ verifyRouter.post('/verify', async (req: Request, res: Response, next: NextFunct
 
     await createPendingRun({ correlationId, input });
 
-    try {
-      const result = await runVerificationPipeline(input, { correlationId });
-      await completeRun(result);
-      res.status(200).json(result);
-    } catch (pipelineErr) {
-      logger.error({ err: pipelineErr, correlationId }, 'Pipeline execution failed');
-      await failRun(correlationId, asMessage(pipelineErr));
-      next(pipelineErr);
-    }
+    // Respond immediately so gateways (DigitalOcean / Cloudflare / etc.) don't kill
+    // the connection on long inputs. Clients poll GET /v1/verify/:correlationId.
+    res.status(202).json({ correlationId, status: 'pending' });
+
+    void (async () => {
+      try {
+        const result = await runVerificationPipeline(input, { correlationId });
+        await completeRun(result);
+      } catch (pipelineErr) {
+        logger.error({ err: pipelineErr, correlationId }, 'Pipeline execution failed');
+        await failRun(correlationId, asMessage(pipelineErr));
+      }
+    })();
   } catch (err) {
     next(err);
   }

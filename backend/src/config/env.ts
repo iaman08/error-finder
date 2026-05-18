@@ -15,6 +15,9 @@ const envSchema = z.object({
 
   MONGODB_URI: z.string().min(1, 'MONGODB_URI is required'),
 
+  JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
+  JWT_EXPIRES_IN: z.string().default('7d'),
+
   GROQ_API_KEY: z.string().min(1, 'GROQ_API_KEY is required'),
   LLM_MODEL_REASONING: z.string().default('llama-3.3-70b-versatile'),
   LLM_MODEL_FAST: z.string().default('llama-3.1-8b-instant'),
@@ -29,6 +32,8 @@ const envSchema = z.object({
   MAX_EVIDENCE_PER_VERIFICATION: intString(12),
   RETRIEVAL_RESULTS_STANDARD: intString(8),
   RETRIEVAL_RESULTS_PROFESSIONAL: intString(10),
+  /** Hard cap on Tavily calls per /verify. Initial round consumes 1; remainder is for refinement. */
+  RETRIEVAL_MAX_CALLS_PER_RUN: intString(3),
   CLAIM_CONCURRENCY: intString(4),
 
   /** ISO date (YYYY-MM-DD). Empty/missing falls back to the system clock at run time. */

@@ -1,8 +1,9 @@
 'use client';
 
-import { History, ShieldCheck, Sparkles } from 'lucide-react';
+import { History, MessageSquare, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { ShienAiWordmark } from '@/components/brand/logo';
 import { cn } from '@/lib/utils';
 
 interface NavItem {
@@ -14,28 +15,33 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   {
-    href: '/',
-    label: 'Verify',
+    href: '/app/evaluation',
+    label: 'Evaluation',
     icon: ShieldCheck,
-    match: (p) => p === '/',
+    match: (p) => p === '/app/evaluation' || p === '/app',
   },
   {
-    href: '/runs',
+    href: '/app/chat',
+    label: 'Chat',
+    icon: MessageSquare,
+    match: (p) => p === '/app/chat' || p.startsWith('/app/chat/'),
+  },
+  {
+    href: '/app/history',
     label: 'History',
     icon: History,
-    match: (p) => p === '/runs' || p.startsWith('/runs/'),
+    match: (p) => p === '/app/history' || p.startsWith('/app/history/'),
   },
 ];
 
-export const Sidebar = () => {
+export const AppSidebar = () => {
   const pathname = usePathname();
   return (
-    <aside className="hidden md:flex md:w-60 lg:w-64 shrink-0 flex-col border-r bg-card/30">
-      <div className="flex h-14 items-center gap-2 px-5 border-b">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
-          <Sparkles className="h-4 w-4" aria-hidden />
-        </div>
-        <span className="text-sm font-semibold tracking-tight">Errorfinder</span>
+    <aside className="hidden md:flex md:w-60 lg:w-64 shrink-0 flex-col border-r border-border/40 bg-card/40 backdrop-blur-sm">
+      <div className="flex h-16 items-center px-5 border-b border-border/40">
+        <Link href="/" className="focus-ring rounded-md">
+          <ShienAiWordmark />
+        </Link>
       </div>
       <nav className="flex-1 px-3 py-4">
         <ul className="space-y-1">
@@ -47,10 +53,10 @@ export const Sidebar = () => {
                 <Link
                   href={item.href}
                   className={cn(
-                    'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors focus-ring',
+                    'flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors focus-ring',
                     active
-                      ? 'bg-accent text-accent-foreground font-medium'
-                      : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+                      ? 'bg-primary/15 text-foreground font-medium ring-1 ring-primary/30'
+                      : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
                   )}
                   aria-current={active ? 'page' : undefined}
                 >
@@ -62,9 +68,9 @@ export const Sidebar = () => {
           })}
         </ul>
       </nav>
-      <div className="border-t px-5 py-4">
+      <div className="border-t border-border/40 px-5 py-4">
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Verify AI responses claim-by-claim against authoritative sources.
+          See clearly in the age of AI. Verify, correct, and trust.
         </p>
       </div>
     </aside>

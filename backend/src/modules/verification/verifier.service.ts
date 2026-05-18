@@ -6,14 +6,12 @@ import {
   HALLUCINATION_TYPES,
   VERDICT_STATUSES,
   type Domain,
-  type RetrievalMode,
 } from '@/domain/enums.js';
 import { AppError } from '@/domain/errors.js';
 import type { AtomicClaim, ClaimVerdict, Evidence } from '@/domain/types.js';
 import { llmClient } from '@/infra/llm/llm.client.js';
-import { retrieveEvidence } from '@/modules/retrieval/retrieval.service.js';
 import { parseJsonFromLLM } from '@/shared/utils/json.js';
-import { normalizeText, randomNonce, safeDataBlock } from '@/shared/utils/text.js';
+import { randomNonce, safeDataBlock } from '@/shared/utils/text.js';
 
 // LLM JSON mode often returns `null` rather than omitting optional fields.
 const optionalLlmString = (max: number) =>
@@ -54,16 +52,30 @@ Given an atomic claim and a numbered list of evidence snippets, decide the claim
 Today's date: ${todayDate}. Use this to assess temporal claims against current reality.
 
 Verdict scale — choose EXACTLY one:
-- VERIFIED: clear, current evidence directly supports the claim.
-- FALSE: clear evidence directly contradicts the claim. This INCLUDES once-true claims whose
-  current state contradicts them (e.g., "Pluto is the 9th planet" — was true historically,
-  current evidence contradicts → FALSE).
-- INCONCLUSIVE: any case that is neither clearly supported nor clearly contradicted. Use this
-  when evidence is missing, insufficient, only tangentially related, or when credible sources
-  genuinely disagree, OR when the claim is an opinion, prediction, definition, or otherwise
-  not testable against current evidence.
+- VERIFIED: at least one credible piece of evidence directly supports the claim and no
+  credible evidence contradicts it.
+- FALSE: at least one credible piece of evidence directly contradicts the claim's specific
+  assertion. This INCLUDES once-true claims whose current state contradicts them (e.g.,
+  "Pluto is the 9th planet" — was true historically, current evidence contradicts → FALSE).
+- INCONCLUSIVE: ONLY when evidence is genuinely missing, only tangentially related to the
+  claim, or credible sources genuinely disagree (mixed supports + contradicts), OR when the
+  claim is an opinion, prediction, definition, or otherwise not testable against evidence.
 
-When in doubt, choose INCONCLUSIVE rather than overcommitting to VERIFIED or FALSE.
+CRITICAL — do NOT hedge to INCONCLUSIVE when contradicting evidence exists:
+- If you can point to a specific snippet that contradicts the claim's assertion, the verdict
+  is FALSE, not INCONCLUSIVE. The presence of contradicting evidence is not "uncertainty";
+  it is the answer.
+- "Evidence doesn't directly address every word of the claim" is NOT grounds for INCONCLUSIVE
+  if some part of the claim is clearly contradicted. Mark FALSE and explain which part.
+- "Evidence is general, not specific to this exact entity" is INCONCLUSIVE only if the
+  evidence neither supports nor contradicts. If general evidence (e.g. about a class) directly
+  rules out the specific claim, that is contradiction → FALSE.
+- "Sources disagree" is INCONCLUSIVE only when credible sources genuinely give opposite
+  answers. A single fringe source supporting a claim that authoritative sources contradict
+  is still FALSE.
+
+When evidence supports → VERIFIED. When evidence contradicts → FALSE. INCONCLUSIVE is the
+narrow case where evidence is absent or genuinely ambiguous.
 
 Hallucination type taxonomy (pick one or more whenever status is FALSE):
 - numerical: wrong number, magnitude, unit, or percentage
@@ -117,7 +129,10 @@ Output STRICT JSON only:
 export interface VerifyClaimInput {
   claim: AtomicClaim;
   domain: Domain;
-  mode: RetrievalMode;
+  /** Shared evidence pool produced by the orchestrator. Verifier does not retrieve. */
+  evidencePool: Evidence[];
+  /** Iteration index reported in the resulting verdict (1 = round one, 2 = round two). */
+  iteration: number;
   correlationId: string;
 }
 
@@ -127,6 +142,8 @@ export interface VerifyClaimOutput {
   injectionFlagged: boolean;
   /** True if a FALSE verdict came back with empty hallucinationTypes. */
   tagMissing: boolean;
+  /** Verifier-suggested follow-up query when status is INCONCLUSIVE; used by orchestrator for the next retrieval round. */
+  refinedQuery?: string;
 }
 
 const todayIso = (): string => env.TODAY_DATE_OVERRIDE ?? new Date().toISOString().slice(0, 10);
@@ -154,130 +171,71 @@ export const verifyClaim = async (input: VerifyClaimInput): Promise<VerifyClaimO
     claimId: input.claim.id,
   });
 
-  const seenQueries = new Set<string>();
-
-  // Iteration 1: initial retrieval seeded with the claim text itself.
-  const initialQuery = input.claim.text;
-  seenQueries.add(normalizeText(initialQuery));
-  const initial = await retrieveEvidence({
-    query: initialQuery,
-    mode: input.mode,
-    domain: input.domain,
-    correlationId: input.correlationId,
-  });
-  let evidencePool: Evidence[] = dedupeByUrl(initial.evidence);
-  let iterations = 1;
-  let lastResult: z.infer<typeof verifierResponseSchema> | null = null;
-  let injectionFlagged = false;
-
-  if (evidencePool.length === 0) {
+  if (input.evidencePool.length === 0) {
     return {
       verdict: {
         claimId: input.claim.id,
         status: 'INCONCLUSIVE',
         confidence: 0.1,
         hallucinationTypes: [],
-        reasoning: 'No relevant evidence retrieved for this claim.',
+        reasoning: 'No evidence available in the shared retrieval pool for this claim.',
         evidenceUsed: [],
-        iterations,
+        iterations: input.iteration,
       },
       injectionFlagged: false,
       tagMissing: false,
     };
   }
 
-  while (iterations <= env.MAX_VERIFICATION_ITERATIONS + 1) {
-    const shown = capEvidenceForVerifier(evidencePool, env.MAX_EVIDENCE_PER_VERIFICATION);
+  const shown = capEvidenceForVerifier(
+    input.evidencePool,
+    input.claim,
+    env.MAX_EVIDENCE_PER_VERIFICATION,
+  );
 
-    lastResult = await runVerifierCall({
-      claim: input.claim,
-      domain: input.domain,
-      evidence: shown,
-      correlationId: input.correlationId,
-    });
-    if (lastResult.injectionDetected) injectionFlagged = true;
+  const result = await runVerifierCall({
+    claim: input.claim,
+    domain: input.domain,
+    evidence: shown,
+    correlationId: input.correlationId,
+  });
 
-    log.debug(
-      {
-        iteration: iterations,
-        status: lastResult.status,
-        confidence: lastResult.confidence,
-        evidenceShown: shown.length,
-        evidencePool: evidencePool.length,
-        injectionDetected: lastResult.injectionDetected,
-      },
-      'Verifier iteration',
-    );
+  log.debug(
+    {
+      iteration: input.iteration,
+      status: result.status,
+      confidence: result.confidence,
+      evidenceShown: shown.length,
+      evidencePool: input.evidencePool.length,
+      injectionDetected: result.injectionDetected,
+    },
+    'Verifier call complete',
+  );
 
-    const conclusive = lastResult.status !== 'INCONCLUSIVE';
-    if (conclusive) break;
-    if (iterations > env.MAX_VERIFICATION_ITERATIONS) break;
-
-    const refined = lastResult.refinedQuery?.trim();
-    if (!refined || refined.length < 4) break;
-    const normalizedRefined = normalizeText(refined);
-    if (seenQueries.has(normalizedRefined)) {
-      log.debug({ refined }, 'Verifier refined query repeats earlier query; stopping');
-      break;
-    }
-    seenQueries.add(normalizedRefined);
-
-    const more = await retrieveEvidence({
-      query: refined,
-      mode: input.mode,
-      domain: input.domain,
-      correlationId: input.correlationId,
-    });
-    const before = evidencePool.length;
-    evidencePool = dedupeByUrl([...evidencePool, ...more.evidence]);
-    iterations += 1;
-    if (evidencePool.length === before) {
-      log.debug('Refined retrieval added no new evidence; stopping');
-      break;
-    }
-  }
-
-  if (!lastResult) {
-    return {
-      verdict: {
-        claimId: input.claim.id,
-        status: 'INCONCLUSIVE',
-        confidence: 0,
-        hallucinationTypes: [],
-        reasoning: 'Verifier produced no result.',
-        evidenceUsed: [],
-        iterations,
-      },
-      injectionFlagged,
-      tagMissing: false,
-    };
-  }
-
-  const shownFinal = capEvidenceForVerifier(evidencePool, env.MAX_EVIDENCE_PER_VERIFICATION);
-  const annotated = applyStances(shownFinal, lastResult.evidenceAnalysis);
-
-  const tagMissing =
-    lastResult.status === 'FALSE' && lastResult.hallucinationTypes.length === 0;
+  const annotated = applyStances(shown, result.evidenceAnalysis);
+  const tagMissing = result.status === 'FALSE' && result.hallucinationTypes.length === 0;
   if (tagMissing) {
     log.warn(
-      { status: lastResult.status },
+      { status: result.status },
       'Verifier produced FALSE verdict without hallucinationTypes; prompt guidance was not followed',
     );
   }
 
+  const refined = result.refinedQuery?.trim();
   return {
     verdict: {
       claimId: input.claim.id,
-      status: lastResult.status,
-      confidence: lastResult.confidence,
-      hallucinationTypes: lastResult.hallucinationTypes,
-      reasoning: lastResult.reasoning,
-      ...(lastResult.correction ? { correction: lastResult.correction } : {}),
+      status: result.status,
+      confidence: result.confidence,
+      hallucinationTypes: result.hallucinationTypes,
+      reasoning: result.reasoning,
+      ...(result.correction ? { correction: result.correction } : {}),
       evidenceUsed: annotated,
-      iterations,
+      iterations: input.iteration,
     },
-    injectionFlagged,
+    injectionFlagged: result.injectionDetected,
     tagMissing,
+    ...(refined && refined.length >= 4 ? { refinedQuery: refined } : {}),
   };
 };
 
@@ -354,15 +312,62 @@ const buildVerifierPrompt = (
 };
 
 /**
- * Picks top-N evidence for the verifier prompt. Ranks trusted-first, then by
- * relevance score. Caps prompt size and keeps recursive iterations focused.
+ * Picks top-N evidence for the verifier prompt. With a shared pool, the Tavily
+ * relevance score reflects the SEED query, not this claim — so rank by token
+ * overlap between the claim text and the evidence snippet first, then by trust,
+ * then by Tavily relevance as a tie-breaker. This stops the verifier from being
+ * shown top-trusted snippets that aren't actually about THIS claim.
  */
-const capEvidenceForVerifier = (pool: Evidence[], maxCount: number): Evidence[] => {
-  const ranked = [...pool].sort((a, b) => {
-    if (a.trusted !== b.trusted) return Number(b.trusted) - Number(a.trusted);
-    return b.relevanceScore - a.relevanceScore;
+const capEvidenceForVerifier = (
+  pool: Evidence[],
+  claim: AtomicClaim,
+  maxCount: number,
+): Evidence[] => {
+  const claimTokens = significantTokens(
+    [claim.text, claim.subject, claim.predicate, claim.object]
+      .filter((s): s is string => Boolean(s))
+      .join(' '),
+  );
+
+  const scored = pool.map((e) => ({
+    evidence: e,
+    claimRelevance: claimRelevanceScore(claimTokens, e),
+  }));
+
+  scored.sort((a, b) => {
+    if (a.claimRelevance !== b.claimRelevance) return b.claimRelevance - a.claimRelevance;
+    if (a.evidence.trusted !== b.evidence.trusted) {
+      return Number(b.evidence.trusted) - Number(a.evidence.trusted);
+    }
+    return b.evidence.relevanceScore - a.evidence.relevanceScore;
   });
-  return ranked.slice(0, maxCount);
+
+  return scored.slice(0, maxCount).map((s) => s.evidence);
+};
+
+const STOPWORDS = new Set([
+  'the','a','an','is','are','was','were','be','been','being','of','in','on','at','to','for',
+  'and','or','but','if','then','than','that','this','these','those','it','its','as','by',
+  'with','from','about','into','over','under','up','down','out','off','do','does','did',
+  'has','have','had','will','would','can','could','should','may','might','must','not','no',
+]);
+
+const significantTokens = (s: string): Set<string> => {
+  const tokens = s
+    .toLowerCase()
+    .split(/[^a-z0-9]+/u)
+    .filter((t) => t.length >= 3 && !STOPWORDS.has(t));
+  return new Set(tokens);
+};
+
+const claimRelevanceScore = (claimTokens: Set<string>, evidence: Evidence): number => {
+  if (claimTokens.size === 0) return 0;
+  const haystack = `${evidence.title ?? ''} ${evidence.snippet}`.toLowerCase();
+  let hits = 0;
+  for (const t of claimTokens) {
+    if (haystack.includes(t)) hits += 1;
+  }
+  return hits / claimTokens.size;
 };
 
 const applyStances = (
@@ -375,15 +380,4 @@ const applyStances = (
     const stance = byIndex.get(i);
     return stance ? { ...e, stance } : e;
   });
-};
-
-const dedupeByUrl = (items: Evidence[]): Evidence[] => {
-  const seen = new Set<string>();
-  const out: Evidence[] = [];
-  for (const e of items) {
-    if (seen.has(e.url)) continue;
-    seen.add(e.url);
-    out.push(e);
-  }
-  return out;
 };

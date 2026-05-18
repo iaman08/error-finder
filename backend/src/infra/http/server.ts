@@ -5,6 +5,8 @@ import { pinoHttp } from 'pino-http';
 import { logger } from '@/config/logger.js';
 import { errorHandler, notFoundHandler } from '@/infra/http/middleware/error-handler.js';
 import { requestIdMiddleware } from '@/infra/http/middleware/request-id.js';
+import { authRouter } from '@/infra/http/routes/auth.route.js';
+import { chatRouter } from '@/infra/http/routes/chat.route.js';
 import { healthRouter } from '@/infra/http/routes/health.route.js';
 import { verifyRouter } from '@/infra/http/routes/verify.route.js';
 
@@ -34,6 +36,8 @@ export const createApp = (): Express => {
   );
 
   app.use('/', healthRouter);
+  app.use('/v1/auth', authRouter);
+  app.use('/v1/chat', chatRouter);
   app.use('/v1', verifyRouter);
 
   app.use(notFoundHandler);

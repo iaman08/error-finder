@@ -110,6 +110,12 @@ export const verifyResponseSchema = z.object({
 export const RUN_STATUSES = ['pending', 'completed', 'failed'] as const;
 export type RunStatus = (typeof RUN_STATUSES)[number];
 
+export const submitAcceptedSchema = z.object({
+  correlationId: z.string(),
+  status: z.enum(RUN_STATUSES),
+});
+export type SubmitAccepted = z.infer<typeof submitAcceptedSchema>;
+
 export const runDocSchema = z.object({
   correlationId: z.string(),
   status: z.enum(RUN_STATUSES),

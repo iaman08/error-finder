@@ -20,7 +20,10 @@ export type VerifyMutation = UseMutationResult<VerifyResponse, ApiError, VerifyR
 
 export const useVerifyMutation = (): VerifyMutation =>
   useMutation<VerifyResponse, ApiError, VerifyRequest>({
-    mutationFn: async (input) => verifyApi.submit(input),
+    mutationFn: async (input) => {
+      const accepted = await verifyApi.submit(input);
+      return verifyApi.pollUntilDone(accepted.correlationId);
+    },
     onSuccess: (result, vars) => {
       const entry: HistoryEntry = {
         correlationId: result.correlationId,
@@ -65,10 +68,10 @@ export const useHistory = (): HistoryEntry[] => {
     const refresh = () => setItems(loadHistory());
     refresh();
     const onChange = () => refresh();
-    window.addEventListener('errorfinder:history-change', onChange);
+    window.addEventListener('shienai:history-change', onChange);
     window.addEventListener('storage', onChange);
     return () => {
-      window.removeEventListener('errorfinder:history-change', onChange);
+      window.removeEventListener('shienai:history-change', onChange);
       window.removeEventListener('storage', onChange);
     };
   }, []);

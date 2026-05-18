@@ -10,7 +10,7 @@ export const generateMetadata = async (props: RunDetailPageProps): Promise<Metad
   return { title: `Run ${params.id.slice(0, 8)}` };
 };
 
-export default async function RunDetailPage(props: RunDetailPageProps) {
+export default async function HistoryRunPage(props: RunDetailPageProps) {
   const params = await props.params;
   return <RunDetail correlationId={params.id} />;
 }

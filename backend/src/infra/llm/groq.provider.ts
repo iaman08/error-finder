@@ -3,9 +3,11 @@ import { env } from '@/config/env.js';
 import { logger as rootLogger } from '@/config/logger.js';
 import { AppError } from '@/domain/errors.js';
 import { withRetry, withTimeout } from '@/shared/utils/async.js';
+import { GROQ_GLOBAL_SYSTEM_PROMPT } from '@/infra/llm/system-prompt.js';
 import type {
   LLMCompletionRequest,
   LLMCompletionResponse,
+  LLMMessage,
   LLMModelTier,
   LLMProvider,
 } from '@/infra/llm/llm.types.js';
@@ -49,12 +51,16 @@ export const groqProvider: LLMProvider = {
 
     const start = Date.now();
 
+    const messages: LLMMessage[] = req.skipGlobalSystemPrompt
+      ? [...req.messages]
+      : [{ role: 'system', content: GROQ_GLOBAL_SYSTEM_PROMPT }, ...req.messages];
+
     const run = () =>
       withTimeout(
         client.chat.completions.create({
           model,
-          messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
-          temperature: req.temperature ?? 0.1,
+          messages: messages.map((m) => ({ role: m.role, content: m.content })),
+          temperature: req.temperature ?? 0,
           max_tokens: req.maxTokens ?? 2048,
           stop: req.stop,
           ...(req.jsonMode ? { response_format: { type: 'json_object' } } : {}),

@@ -36,7 +36,7 @@ export const RunDetail = ({ correlationId }: RunDetailProps) => {
             <p className="text-sm font-medium">Could not load this run</p>
             <p className="text-sm text-muted-foreground">{error?.message ?? 'Unknown error'}</p>
             <Button asChild variant="outline" size="sm">
-              <Link href="/runs">Back to history</Link>
+              <Link href="/app/history">Back to history</Link>
             </Button>
           </div>
         </CardContent>
@@ -59,7 +59,7 @@ const RunDetailContent = ({ run }: { run: RunDoc }) => {
     <div className="space-y-5">
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="sm" asChild className="gap-1.5 text-muted-foreground">
-          <Link href="/runs">
+          <Link href="/app/history">
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
             All runs
           </Link>

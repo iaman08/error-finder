@@ -23,6 +23,12 @@ export interface LLMCompletionRequest {
   correlationId: string;
   /** Optional per-call logger; falls back to provider's logger. */
   logger?: Logger;
+  /**
+   * Suppress the global evaluator-persona system prompt that is otherwise
+   * prepended to every Groq call. Only use this for non-evaluation flows
+   * (e.g. generating a chat response that another step will evaluate).
+   */
+  skipGlobalSystemPrompt?: boolean;
 }
 
 export interface LLMUsage {

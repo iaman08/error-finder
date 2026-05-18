@@ -24,7 +24,7 @@ export const RunList = () => {
             Your recent verifications will appear here. History is stored locally in your browser.
           </p>
           <Button asChild variant="outline" size="sm" className="mt-2">
-            <Link href="/">Start a verification</Link>
+            <Link href="/app/evaluation">Start a verification</Link>
           </Button>
         </CardContent>
       </Card>
@@ -51,7 +51,7 @@ export const RunList = () => {
         {items.map((item) => (
           <li key={item.correlationId}>
             <Link
-              href={`/runs/${encodeURIComponent(item.correlationId)}`}
+              href={`/app/history/${encodeURIComponent(item.correlationId)}`}
               className="block rounded-lg border bg-card p-4 transition-colors hover:bg-accent/40 focus-ring"
             >
               <div className="flex flex-wrap items-start justify-between gap-3">

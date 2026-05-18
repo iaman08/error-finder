@@ -1,6 +1,8 @@
-import type { EvalCase, CaseResult } from '@/types.js';
-import { verifyResponseSchema } from '@/types.js';
+import type { EvalCase, CaseResult, RunDoc } from '@/types.js';
+import { runDocSchema, submitAcceptedSchema, verifyResponseSchema } from '@/types.js';
 import { scoreCase } from '@/scorer.js';
+
+const POLL_INTERVAL_MS = 2_500;
 
 export interface RunnerOptions {
   backendUrl: string;
@@ -49,28 +51,70 @@ const executeCase = async (
   );
 
   try {
-    const response = await fetch(`${options.backendUrl}/v1/verify`, {
+    const submitResponse = await fetch(`${options.backendUrl}/v1/verify`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify(testCase.input),
       signal: controller.signal,
     });
-
-    const text = await response.text();
-    if (!response.ok) {
+    const submitText = await submitResponse.text();
+    if (!submitResponse.ok) {
       return {
         caseId: testCase.id,
         category: testCase.category,
         description: testCase.description,
         status: 'error',
         checks: [],
-        error: `HTTP ${response.status}: ${text.slice(0, 400)}`,
+        error: `HTTP ${submitResponse.status}: ${submitText.slice(0, 400)}`,
+        durationMs: Date.now() - start,
+      };
+    }
+    const submitParsed = submitAcceptedSchema.safeParse(
+      submitText.length > 0 ? safeJsonParse(submitText) : null,
+    );
+    if (!submitParsed.success) {
+      return {
+        caseId: testCase.id,
+        category: testCase.category,
+        description: testCase.description,
+        status: 'error',
+        checks: [],
+        error: `Accept-response schema mismatch: ${submitParsed.error.issues
+          .slice(0, 3)
+          .map((i) => `${i.path.join('.')}:${i.message}`)
+          .join('; ')}`,
+        durationMs: Date.now() - start,
+      };
+    }
+    const { correlationId } = submitParsed.data;
+
+    const doc = await pollForRun(options.backendUrl, correlationId, controller.signal);
+
+    if (doc.status === 'failed') {
+      return {
+        caseId: testCase.id,
+        category: testCase.category,
+        description: testCase.description,
+        status: 'error',
+        checks: [],
+        error: `Pipeline failed: ${doc.error ?? 'unknown error'}`,
         durationMs: Date.now() - start,
       };
     }
 
-    const raw: unknown = text.length > 0 ? safeJsonParse(text) : null;
-    const parsed = verifyResponseSchema.safeParse(raw);
+    const parsed = verifyResponseSchema.safeParse({
+      correlationId: doc.correlationId,
+      detectedDomain: doc.detectedDomain,
+      mode: doc.input.mode,
+      claims: doc.claims,
+      verdicts: doc.verdicts,
+      compliance: doc.compliance,
+      overallStatus: doc.overallStatus,
+      correctedOutput: doc.correctedOutput,
+      timings: doc.timings,
+      warnings: doc.warnings,
+      injection: doc.injection,
+    });
     if (!parsed.success) {
       return {
         caseId: testCase.id,
@@ -78,7 +122,7 @@ const executeCase = async (
         description: testCase.description,
         status: 'error',
         checks: [],
-        error: `Response schema mismatch: ${parsed.error.issues
+        error: `Completed-run schema mismatch: ${parsed.error.issues
           .slice(0, 3)
           .map((i) => `${i.path.join('.')}:${i.message}`)
           .join('; ')}`,
@@ -120,3 +164,49 @@ const safeJsonParse = (raw: string): unknown => {
     return null;
   }
 };
+
+const pollForRun = async (
+  backendUrl: string,
+  correlationId: string,
+  signal: AbortSignal,
+): Promise<RunDoc> => {
+  while (true) {
+    if (signal.aborted) throw new Error('case timed out while polling');
+
+    const res = await fetch(`${backendUrl}/v1/verify/${encodeURIComponent(correlationId)}`, {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+      signal,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(`Poll HTTP ${res.status}: ${text.slice(0, 200)}`);
+    }
+    const parsed = runDocSchema.safeParse(text.length > 0 ? safeJsonParse(text) : null);
+    if (!parsed.success) {
+      throw new Error(
+        `Run schema mismatch: ${parsed.error.issues
+          .slice(0, 3)
+          .map((i) => `${i.path.join('.')}:${i.message}`)
+          .join('; ')}`,
+      );
+    }
+    if (parsed.data.status !== 'pending') return parsed.data;
+
+    await sleep(POLL_INTERVAL_MS, signal);
+  }
+};
+
+const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error('case timed out while polling'));
+    };
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  });

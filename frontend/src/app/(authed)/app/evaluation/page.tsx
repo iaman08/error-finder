@@ -11,12 +11,11 @@ import { useVerifyMutation } from '@/features/verify/hooks';
 import type { VerifyRequest } from '@/features/verify/schemas';
 
 interface FormSeed {
-  /** Monotonic id used as the form's React key — bumping it re-mounts the form. */
   key: number;
   defaults?: VerifyRequest;
 }
 
-export default function VerifyPage() {
+export default function EvaluationPage() {
   const mutation = useVerifyMutation();
   const [lastInput, setLastInput] = useState<VerifyRequest | null>(null);
   const [seed, setSeed] = useState<FormSeed>({ key: 0 });
@@ -37,12 +36,19 @@ export default function VerifyPage() {
     }
   };
 
+  const handleClear = () => {
+    mutation.reset();
+    setLastInput(null);
+    setSeed((prev) => ({ key: prev.key + 1 }));
+  };
+
   return (
     <div className="grid gap-6">
       <VerifyForm
         key={seed.key}
         defaults={seed.defaults}
         onSubmit={handleSubmit}
+        onClear={handleClear}
         isSubmitting={mutation.isPending}
       />
       <VerifyProgress active={mutation.isPending} />

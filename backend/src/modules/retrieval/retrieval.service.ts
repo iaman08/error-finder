@@ -21,8 +21,30 @@ export interface RetrievalOutcome {
 }
 
 /**
- * Performs a single retrieval round. Verifier may call this multiple times
- * with refined queries to drive recursive retrieval — see verifier.service.
+ * Tracks Tavily call usage across a single /verify run. The orchestrator
+ * constructs one budget per run and routes every retrieval through it so
+ * the total external-search cost cannot exceed the configured cap.
+ */
+export class RetrievalBudget {
+  private used = 0;
+  constructor(public readonly max: number) {}
+  get remaining(): number {
+    return Math.max(0, this.max - this.used);
+  }
+  get callsUsed(): number {
+    return this.used;
+  }
+  /** Returns null when the budget is exhausted; callers must treat that as "no evidence". */
+  async retrieve(req: RetrievalRequest): Promise<RetrievalOutcome | null> {
+    if (this.remaining <= 0) return null;
+    this.used += 1;
+    return retrieveEvidence(req);
+  }
+}
+
+/**
+ * Performs a single Tavily search and shapes the response into Evidence[].
+ * Most callers should go through RetrievalBudget — direct use bypasses the cap.
  */
 export const retrieveEvidence = async (req: RetrievalRequest): Promise<RetrievalOutcome> => {
   const log = rootLogger.child({
@@ -79,6 +101,17 @@ export const retrieveEvidence = async (req: RetrievalRequest): Promise<Retrieval
     rawCount: response.results.length,
     trustedCount: evidence.filter((e) => e.trusted).length,
   };
+};
+
+export const dedupeEvidenceByUrl = (items: Evidence[]): Evidence[] => {
+  const seen = new Set<string>();
+  const out: Evidence[] = [];
+  for (const e of items) {
+    if (seen.has(e.url)) continue;
+    seen.add(e.url);
+    out.push(e);
+  }
+  return out;
 };
 
 const hostOf = (url: string): string => {
