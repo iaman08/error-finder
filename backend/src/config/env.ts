@@ -15,6 +15,9 @@ const envSchema = z.object({
 
   MONGODB_URI: z.string().min(1, 'MONGODB_URI is required'),
 
+  JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
+  JWT_EXPIRES_IN: z.string().default('7d'),
+
   GROQ_API_KEY: z.string().min(1, 'GROQ_API_KEY is required'),
   LLM_MODEL_REASONING: z.string().default('llama-3.3-70b-versatile'),
   LLM_MODEL_FAST: z.string().default('llama-3.1-8b-instant'),

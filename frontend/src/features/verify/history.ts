@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { VERDICT_STATUSES, RETRIEVAL_MODES, DOMAINS } from '@/features/verify/schemas';
 
-const STORAGE_KEY = 'errorfinder.history.v1';
+const STORAGE_KEY = 'shienai.history.v1';
 const MAX_ENTRIES = 50;
 
 const historyEntrySchema = z.object({
@@ -44,7 +44,7 @@ export const saveHistoryEntry = (entry: HistoryEntry): void => {
   const next = [entry, ...without].slice(0, MAX_ENTRIES);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    window.dispatchEvent(new CustomEvent('errorfinder:history-change'));
+    window.dispatchEvent(new CustomEvent('shienai:history-change'));
   } catch {
     // Storage quota or disabled — silently ignore.
   }
@@ -55,7 +55,7 @@ export const removeHistoryEntry = (correlationId: string): void => {
   const next = loadHistory().filter((e) => e.correlationId !== correlationId);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    window.dispatchEvent(new CustomEvent('errorfinder:history-change'));
+    window.dispatchEvent(new CustomEvent('shienai:history-change'));
   } catch {
     // ignore
   }
@@ -64,5 +64,5 @@ export const removeHistoryEntry = (correlationId: string): void => {
 export const clearHistory = (): void => {
   if (!isBrowser()) return;
   localStorage.removeItem(STORAGE_KEY);
-  window.dispatchEvent(new CustomEvent('errorfinder:history-change'));
+  window.dispatchEvent(new CustomEvent('shienai:history-change'));
 };

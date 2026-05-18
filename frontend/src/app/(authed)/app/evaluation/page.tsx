@@ -11,12 +11,11 @@ import { useVerifyMutation } from '@/features/verify/hooks';
 import type { VerifyRequest } from '@/features/verify/schemas';
 
 interface FormSeed {
-  /** Monotonic id used as the form's React key — bumping it re-mounts the form. */
   key: number;
   defaults?: VerifyRequest;
 }
 
-export default function VerifyPage() {
+export default function EvaluationPage() {
   const mutation = useVerifyMutation();
   const [lastInput, setLastInput] = useState<VerifyRequest | null>(null);
   const [seed, setSeed] = useState<FormSeed>({ key: 0 });

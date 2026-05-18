@@ -18,14 +18,14 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: 'Errorfinder — AI hallucination detection',
-    template: '%s — Errorfinder',
+    default: 'Shien Ai — See Clearly in the Age of AI',
+    template: '%s — Shien Ai',
   },
   description:
-    'Verify AI responses claim-by-claim against authoritative sources. Detect hallucinations, contradictions, and stale information.',
-  applicationName: 'Errorfinder',
-  authors: [{ name: 'Errorfinder' }],
-  keywords: ['AI', 'hallucination detection', 'verification', 'fact-checking', 'LLM'],
+    'Unmasking hallucinations for reliable, factual AI. Shien Ai detects and flags hallucinations in real time, restoring trust in generated content.',
+  applicationName: 'Shien Ai',
+  authors: [{ name: 'Shien Ai' }],
+  keywords: ['AI', 'hallucination detection', 'verification', 'fact-checking', 'LLM', 'Shien Ai'],
 };
 
 export const viewport: Viewport = {

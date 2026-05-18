@@ -8,40 +8,40 @@
     --foreground: 240 10% 4%;
     --card: 0 0% 100%;
     --card-foreground: 240 10% 4%;
-    --primary: 240 6% 10%;
+    --primary: 262 83% 58%;
     --primary-foreground: 0 0% 98%;
     --secondary: 240 5% 96%;
     --secondary-foreground: 240 6% 10%;
     --muted: 240 5% 96%;
     --muted-foreground: 240 4% 46%;
-    --accent: 240 5% 96%;
-    --accent-foreground: 240 6% 10%;
+    --accent: 262 70% 96%;
+    --accent-foreground: 262 83% 30%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
     --border: 240 6% 90%;
     --input: 240 6% 90%;
-    --ring: 240 6% 10%;
-    --radius: 0.625rem;
+    --ring: 262 83% 58%;
+    --radius: 0.75rem;
   }
 
   .dark {
-    --background: 240 10% 4%;
+    --background: 240 35% 5%;
     --foreground: 0 0% 98%;
-    --card: 240 8% 6%;
+    --card: 240 30% 8%;
     --card-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 6% 10%;
-    --secondary: 240 4% 16%;
+    --primary: 262 83% 65%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 20% 14%;
     --secondary-foreground: 0 0% 98%;
-    --muted: 240 4% 14%;
-    --muted-foreground: 240 5% 65%;
-    --accent: 240 4% 16%;
+    --muted: 240 18% 12%;
+    --muted-foreground: 240 8% 70%;
+    --accent: 262 50% 22%;
     --accent-foreground: 0 0% 98%;
-    --destructive: 0 63% 31%;
+    --destructive: 0 70% 50%;
     --destructive-foreground: 0 0% 98%;
-    --border: 240 4% 18%;
-    --input: 240 4% 18%;
-    --ring: 240 5% 84%;
+    --border: 240 20% 18%;
+    --input: 240 20% 18%;
+    --ring: 262 83% 65%;
   }
 }
 
@@ -57,7 +57,7 @@
     font-feature-settings: 'rlig' 1, 'calt' 1;
   }
   ::selection {
-    @apply bg-foreground/10;
+    @apply bg-primary/30 text-foreground;
   }
 }
 
@@ -76,5 +76,22 @@
   .scrollbar-thin::-webkit-scrollbar-thumb {
     background-color: hsl(var(--muted-foreground) / 0.3);
     border-radius: 3px;
+  }
+  .bg-aurora {
+    background-image:
+      radial-gradient(ellipse 80% 60% at 20% 10%, hsl(262 60% 35% / 0.55), transparent 60%),
+      radial-gradient(ellipse 70% 50% at 80% 0%, hsl(280 70% 45% / 0.4), transparent 55%),
+      radial-gradient(ellipse 60% 50% at 50% 100%, hsl(250 60% 30% / 0.45), transparent 60%);
+  }
+  .text-gradient-purple {
+    background: linear-gradient(135deg, hsl(0 0% 100%) 0%, hsl(262 80% 80%) 60%, hsl(280 80% 85%) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .ring-glow {
+    box-shadow:
+      0 0 0 1px hsl(var(--border)),
+      0 0 40px -10px hsl(var(--primary) / 0.4);
   }
 }

@@ -68,10 +68,10 @@ export const useHistory = (): HistoryEntry[] => {
     const refresh = () => setItems(loadHistory());
     refresh();
     const onChange = () => refresh();
-    window.addEventListener('errorfinder:history-change', onChange);
+    window.addEventListener('shienai:history-change', onChange);
     window.addEventListener('storage', onChange);
     return () => {
-      window.removeEventListener('errorfinder:history-change', onChange);
+      window.removeEventListener('shienai:history-change', onChange);
       window.removeEventListener('storage', onChange);
     };
   }, []);
