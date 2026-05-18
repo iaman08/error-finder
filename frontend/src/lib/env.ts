@@ -4,7 +4,8 @@ const clientEnvSchema = z.object({
   NEXT_PUBLIC_BACKEND_URL: z
     .string()
     .url('NEXT_PUBLIC_BACKEND_URL must be a valid URL')
-    .default('http://localhost:4000'),
+    .default('http://localhost:4000')
+    .transform((url) => url.replace(/\/+$/, '')),
 });
 
 const parsed = clientEnvSchema.safeParse({
