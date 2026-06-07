@@ -31,6 +31,7 @@ export const EVAL_CATEGORIES = [
   'inconclusive',
   'injection',
   'compliance',
+  'fragment',
 ] as const;
 export type EvalCategory = (typeof EVAL_CATEGORIES)[number];
 

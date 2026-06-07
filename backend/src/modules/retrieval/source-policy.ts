@@ -25,6 +25,22 @@ const LOW_TRUST_HOSTS: ReadonlyArray<string> = [
   'mastodon.social',
 ];
 
+/**
+ * Fiction, mythology, and belief-based sources. Evidence from these hosts
+ * cannot verify empirical facts — existence of a claim in such sources ≠
+ * verification. Blocked in all retrieval modes.
+ */
+const FICTION_MYTHOLOGY_HOSTS: ReadonlyArray<string> = [
+  'mythology.net',
+  'mythopedia.com',
+  'sacred-texts.com',
+  'godchecker.com',
+  'theoi.com',
+  'pantheon.org',
+  'fandom.com',
+  'tvtropes.org',
+];
+
 const PROFESSIONAL_INCLUDE_BY_DOMAIN: Record<Domain, ReadonlyArray<string>> = {
   medical: [
     'pubmed.ncbi.nlm.nih.gov',
@@ -111,14 +127,14 @@ export const buildSourcePolicy = (
   if (mode === 'professional') {
     return {
       includeDomains: [...PROFESSIONAL_INCLUDE_BY_DOMAIN[domain]],
-      excludeDomains: [...LOW_TRUST_HOSTS],
+      excludeDomains: [...LOW_TRUST_HOSTS, ...FICTION_MYTHOLOGY_HOSTS],
       maxResults: limits.professional,
       preferRecent: domain === 'news' || domain === 'finance',
     };
   }
   return {
     includeDomains: [],
-    excludeDomains: [...LOW_TRUST_HOSTS],
+    excludeDomains: [...LOW_TRUST_HOSTS, ...FICTION_MYTHOLOGY_HOSTS],
     maxResults: limits.standard,
     preferRecent: domain === 'news' || domain === 'finance',
   };

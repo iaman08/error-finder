@@ -24,6 +24,7 @@ export type EvidenceStance = (typeof EVIDENCE_STANCES)[number];
 
 export const PIPELINE_STAGES = [
   'domain_detection',
+  'claim_reconstruction',
   'retrieval_initial',
   'claim_decomposition',
   'claim_verification',

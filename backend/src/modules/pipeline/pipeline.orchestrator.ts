@@ -13,6 +13,10 @@ import type {
 } from '@/domain/types.js';
 import { runCompliance } from '@/modules/compliance/compliance.service.js';
 import { decomposeClaims } from '@/modules/claim-decomposition/decomposer.service.js';
+import {
+  reconstructClaim,
+  toReconstructionMeta,
+} from '@/modules/claim-reconstruction/reconstructor.service.js';
 import { detectDomain } from '@/modules/domain-detection/domain-detector.service.js';
 import {
   RetrievalBudget,
@@ -61,13 +65,29 @@ export const runVerificationPipeline = async (
     }),
   );
 
-  // Decomposition and compliance run in parallel — they're independent.
-  // No "initial pool" retrieval: per-claim retrieval inside the verifier is far more targeted.
+  // ── Claim Reconstruction (Stage 3) ─────────────────────────────────────────
+  // Detect fragmentary model outputs and reconstruct full claims before decomposition.
+  const reconstruction = await stageTimer('claim_reconstruction', () =>
+    reconstructClaim({
+      userInput: input.userInput,
+      modelOutput: input.modelOutput,
+      correlationId,
+    }),
+  );
+  const reconstructionMeta = toReconstructionMeta(reconstruction);
+  if (reconstruction.reconstructed) {
+    warnings.push(
+      `Model output was fragmentary; reconstructed claim: "${reconstruction.effectiveOutput}"`,
+    );
+  }
+
+  // Decomposition receives the (possibly reconstructed) output.
+  // Compliance still checks the original raw output.
   const [decomposeResult, compliance] = await Promise.all([
     stageTimer('claim_decomposition', () =>
       decomposeClaims({
         userInput: input.userInput,
-        modelOutput: input.modelOutput,
+        modelOutput: reconstruction.effectiveOutput,
         correlationId,
       }),
     ),
@@ -80,8 +100,13 @@ export const runVerificationPipeline = async (
     ),
   ]);
 
-  const { claims } = decomposeResult;
+  const { claims: rawClaims } = decomposeResult;
   warnings.push(...decomposeResult.warnings);
+
+  // Mark claims as reconstructed when the output was rebuilt from a fragment.
+  const claims = reconstruction.reconstructed
+    ? rawClaims.map((c) => ({ ...c, reconstructed: true }))
+    : rawClaims;
 
   if (claims.length === 0) {
     log.warn('No claims produced; returning empty verdict set');
@@ -108,11 +133,10 @@ export const runVerificationPipeline = async (
   // the entire run. Initial round seeds the pool from claim text; refinement only
   // fires for claims that came back INCONCLUSIVE and only while budget remains.
   const budget = new RetrievalBudget(env.RETRIEVAL_MAX_CALLS_PER_RUN);
-  const checkableClaims = claims.filter((c) => c.isCheckable);
 
   let evidencePool: Evidence[] = [];
-  if (checkableClaims.length > 0) {
-    const seedQuery = buildSeedQuery(checkableClaims);
+  if (claims.length > 0) {
+    const seedQuery = buildSeedQuery(claims);
     const seedOutcome = await budget.retrieve({
       query: seedQuery,
       mode: input.mode,
@@ -243,6 +267,7 @@ export const runVerificationPipeline = async (
     timings,
     warnings,
     injection,
+    ...(reconstructionMeta ? { reconstruction: reconstructionMeta } : {}),
   };
 };
 

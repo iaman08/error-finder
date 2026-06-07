@@ -58,8 +58,17 @@ Verdict scale — choose EXACTLY one:
   assertion. This INCLUDES once-true claims whose current state contradicts them (e.g.,
   "Pluto is the 9th planet" — was true historically, current evidence contradicts → FALSE).
 - INCONCLUSIVE: ONLY when evidence is genuinely missing, only tangentially related to the
-  claim, or credible sources genuinely disagree (mixed supports + contradicts), OR when the
-  claim is an opinion, prediction, definition, or otherwise not testable against evidence.
+  claim, or credible sources genuinely disagree (mixed supports + contradicts).
+
+OPINIONS, DEFINITIONS, AND HYPOTHETICALS — VERIFY THEM:
+Do NOT auto-classify opinions, definitions, or hypotheticals as INCONCLUSIVE. These often
+embed factual assertions that can be verified or falsified:
+- "Python is the best language because it runs on JVM" → the JVM claim is factually FALSE.
+- "A whale is a fish" → this definition is factually FALSE.
+- "Homeopathy cures cancer" → this opinion is factually FALSE.
+- "If Earth were flat, gravity would work differently" → the premise can be checked.
+Extract the factual assertion embedded in the claim and verify IT against evidence.
+Only mark truly subjective, evidence-free preferences as INCONCLUSIVE (e.g. "Blue is prettier than red").
 
 CRITICAL — do NOT hedge to INCONCLUSIVE when contradicting evidence exists:
 - If you can point to a specific snippet that contradicts the claim's assertion, the verdict
@@ -114,6 +123,12 @@ you MUST find evidence of THAT SPECIFIC publication existing. Generic confirmati
 If you cannot locate the specific publication in evidence, the claim is likely a citation
 hallucination — set status=FALSE with hallucinationTypes=["citation"] rather than INCONCLUSIVE.
 
+REALITY GUARD:
+If a claim asserts an empirical fact about the real world (a measurable, observable, or
+historically documented event), evidence from fiction, mythology, religious scripture,
+superstition, or belief-based sources CANNOT verify or contradict it. The existence of a
+claim in such sources does NOT constitute verification. Treat any such evidence as neutral.
+
 Output STRICT JSON only:
 {
   "status": "...",
@@ -149,21 +164,6 @@ export interface VerifyClaimOutput {
 const todayIso = (): string => env.TODAY_DATE_OVERRIDE ?? new Date().toISOString().slice(0, 10);
 
 export const verifyClaim = async (input: VerifyClaimInput): Promise<VerifyClaimOutput> => {
-  if (!input.claim.isCheckable) {
-    return {
-      verdict: {
-        claimId: input.claim.id,
-        status: 'INCONCLUSIVE',
-        confidence: 0,
-        hallucinationTypes: [],
-        reasoning: 'Claim is an opinion, definition, or hypothetical and is not testable against evidence.',
-        evidenceUsed: [],
-        iterations: 0,
-      },
-      injectionFlagged: false,
-      tagMissing: false,
-    };
-  }
 
   const log = rootLogger.child({
     module: 'verifier',

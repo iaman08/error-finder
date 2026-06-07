@@ -28,6 +28,8 @@ export interface AtomicClaim {
   temporalContext?: string;
   isCheckable: boolean;
   rationale?: string;
+  /** True when the claim was derived from a reconstructed fragment. */
+  reconstructed?: boolean;
 }
 
 export interface ClaimVerdict {
@@ -68,6 +70,15 @@ export interface InjectionSignal {
   llmSelfReports: number;
 }
 
+export interface ReconstructionMeta {
+  /** True if the model output was reconstructed from a fragment. */
+  reconstructed: boolean;
+  /** The original raw model output before reconstruction. */
+  originalOutput: string;
+  /** Qualifiers extracted from the input and preserved during reconstruction. */
+  preservedQualifiers: string[];
+}
+
 export interface VerificationResult {
   correlationId: string;
   detectedDomain: Domain;
@@ -82,4 +93,6 @@ export interface VerificationResult {
   warnings: string[];
   /** Aggregated prompt-injection signal across pre-scan and LLM self-reports. */
   injection: InjectionSignal;
+  /** Metadata about claim reconstruction from fragmentary output. */
+  reconstruction?: ReconstructionMeta;
 }

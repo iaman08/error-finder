@@ -274,6 +274,73 @@ const COMPLIANCE: EvalCase[] = [
   },
 ];
 
+const FRAGMENT: EvalCase[] = [
+  {
+    id: 'fragment-pm-india',
+    category: 'fragment',
+    description:
+      'Entity-only answer for a role question — reconstruction should produce "Rahul Gandhi is the PM of India" which is FALSE.',
+    input: {
+      userInput: 'Who is the PM of India?',
+      modelOutput: 'Rahul Gandhi',
+      mode: 'standard',
+    },
+    expectations: {
+      overallStatus: 'FALSE',
+      expectAnyFalse: true,
+    },
+    calibrationTargets: [{ claimContains: 'Rahul Gandhi', expectedTruth: 'FALSE' }],
+  },
+  {
+    id: 'fragment-capital-australia',
+    category: 'fragment',
+    description:
+      'Single-word wrong answer — "Sydney" is not the capital of Australia (Canberra is).',
+    input: {
+      userInput: 'What is the capital of Australia?',
+      modelOutput: 'Sydney',
+      mode: 'standard',
+    },
+    expectations: {
+      overallStatus: 'FALSE',
+      expectAnyFalse: true,
+    },
+    calibrationTargets: [{ claimContains: 'Sydney', expectedTruth: 'FALSE' }],
+  },
+  {
+    id: 'fragment-continents-wrong',
+    category: 'fragment',
+    description: 'Numeric-only answer that is wrong — there are 7 continents, not 5.',
+    input: {
+      userInput: 'How many continents are there?',
+      modelOutput: '5',
+      mode: 'standard',
+    },
+    expectations: {
+      overallStatus: 'FALSE',
+      expectAnyFalse: true,
+      expectHallucinationTypes: ['numerical'],
+    },
+    calibrationTargets: [{ claimContains: '5', expectedTruth: 'FALSE' }],
+  },
+  {
+    id: 'fragment-correct-entity',
+    category: 'fragment',
+    description:
+      'Terse but correct answer — Shakespeare did write Romeo and Juliet. Should reconstruct and verify.',
+    input: {
+      userInput: 'Who wrote Romeo and Juliet?',
+      modelOutput: 'Shakespeare',
+      mode: 'standard',
+    },
+    expectations: {
+      overallStatus: 'VERIFIED',
+      expectAnyFalse: false,
+    },
+    calibrationTargets: [{ claimContains: 'Shakespeare', expectedTruth: 'TRUE' }],
+  },
+];
+
 export const ALL_CASES: EvalCase[] = [
   ...CONTROL,
   ...NUMERICAL,
@@ -288,4 +355,5 @@ export const ALL_CASES: EvalCase[] = [
   ...INCONCLUSIVE,
   ...INJECTION,
   ...COMPLIANCE,
+  ...FRAGMENT,
 ];
