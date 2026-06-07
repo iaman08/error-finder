@@ -21,8 +21,8 @@ const envSchema = z.object({
   GROQ_API_KEY: z.string().min(1, 'GROQ_API_KEY is required'),
   LLM_MODEL_REASONING: z.string().default('llama-3.3-70b-versatile'),
   LLM_MODEL_FAST: z.string().default('llama-3.1-8b-instant'),
-  LLM_REQUEST_TIMEOUT_MS: intString(45_000),
-  LLM_MAX_RETRIES: intString(2),
+  LLM_REQUEST_TIMEOUT_MS: intString(30_000),
+  LLM_MAX_RETRIES: intString(1),
 
   TAVILY_API_KEY: z.string().min(1, 'TAVILY_API_KEY is required'),
   TAVILY_REQUEST_TIMEOUT_MS: intString(20_000),

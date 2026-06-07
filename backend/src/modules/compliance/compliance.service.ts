@@ -63,7 +63,7 @@ export const runCompliance = async (input: ComplianceInput): Promise<ComplianceV
   const completion = await llmClient.complete({
     stageTag: 'compliance',
     correlationId: input.correlationId,
-    tier: 'reasoning',
+    tier: 'fast',
     temperature: 0,
     maxTokens: 800,
     jsonMode: true,

@@ -56,24 +56,27 @@ export const runVerificationPipeline = async (
     log.warn({ preScanMatches }, 'Prompt-injection pre-scan flagged content');
   }
 
-  const detection = await stageTimer('domain_detection', () =>
-    detectDomain({
-      userInput: input.userInput,
-      modelOutput: input.modelOutput,
-      correlationId,
-      ...(input.domainOverride ? { override: input.domainOverride } : {}),
-    }),
-  );
+  // ── Stage 1: Domain detection + Claim reconstruction (parallel) ──────────
+  // These are independent — domain detection doesn't need reconstruction and
+  // vice versa. Running them in parallel saves one full LLM round-trip.
+  const [detection, reconstruction] = await Promise.all([
+    stageTimer('domain_detection', () =>
+      detectDomain({
+        userInput: input.userInput,
+        modelOutput: input.modelOutput,
+        correlationId,
+        ...(input.domainOverride ? { override: input.domainOverride } : {}),
+      }),
+    ),
+    stageTimer('claim_reconstruction', () =>
+      reconstructClaim({
+        userInput: input.userInput,
+        modelOutput: input.modelOutput,
+        correlationId,
+      }),
+    ),
+  ]);
 
-  // ── Claim Reconstruction (Stage 3) ─────────────────────────────────────────
-  // Detect fragmentary model outputs and reconstruct full claims before decomposition.
-  const reconstruction = await stageTimer('claim_reconstruction', () =>
-    reconstructClaim({
-      userInput: input.userInput,
-      modelOutput: input.modelOutput,
-      correlationId,
-    }),
-  );
   const reconstructionMeta = toReconstructionMeta(reconstruction);
   if (reconstruction.reconstructed) {
     warnings.push(
@@ -81,6 +84,7 @@ export const runVerificationPipeline = async (
     );
   }
 
+  // ── Stage 2: Decomposition + Compliance (parallel) ──────────────────────
   // Decomposition receives the (possibly reconstructed) output.
   // Compliance still checks the original raw output.
   const [decomposeResult, compliance] = await Promise.all([
