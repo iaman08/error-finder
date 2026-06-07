@@ -19,6 +19,19 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('7d'),
 
   GROQ_API_KEY: z.string().min(1, 'GROQ_API_KEY is required'),
+  /** Comma-separated fallback Groq API keys. Used when the primary key hits rate limits or credit exhaustion. */
+  GROQ_FALLBACK_API_KEYS: z
+    .string()
+    .optional()
+    .transform((v) =>
+      v
+        ? v
+            .split(',')
+            .map((k) => k.trim())
+            .filter((k) => k.length > 0)
+        : [],
+    )
+    .pipe(z.array(z.string())),
   LLM_MODEL_REASONING: z.string().default('llama-3.3-70b-versatile'),
   LLM_MODEL_FAST: z.string().default('llama-3.1-8b-instant'),
   LLM_REQUEST_TIMEOUT_MS: intString(30_000),
