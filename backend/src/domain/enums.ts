@@ -23,11 +23,8 @@ export const EVIDENCE_STANCES = ['supports', 'contradicts', 'neutral'] as const;
 export type EvidenceStance = (typeof EVIDENCE_STANCES)[number];
 
 export const PIPELINE_STAGES = [
-  'domain_detection',
-  'claim_reconstruction',
-  'retrieval_initial',
-  'claim_decomposition',
-  'claim_verification',
-  'compliance',
+  'analysis',
+  'retrieval',
+  'verification',
 ] as const;
 export type PipelineStage = (typeof PIPELINE_STAGES)[number];

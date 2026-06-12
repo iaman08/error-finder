@@ -1,7 +1,6 @@
 import { env } from '@/config/env.js';
 import { logger as rootLogger } from '@/config/logger.js';
 import type { Domain, PipelineStage, VerdictStatus } from '@/domain/enums.js';
-import { AppError } from '@/domain/errors.js';
 import type {
   AtomicClaim,
   ClaimVerdict,
@@ -11,22 +10,17 @@ import type {
   VerificationInput,
   VerificationResult,
 } from '@/domain/types.js';
-import { runCompliance } from '@/modules/compliance/compliance.service.js';
-import { decomposeClaims } from '@/modules/claim-decomposition/decomposer.service.js';
 import {
-  reconstructClaim,
-  toReconstructionMeta,
-} from '@/modules/claim-reconstruction/reconstructor.service.js';
-import { detectDomain } from '@/modules/domain-detection/domain-detector.service.js';
+  runUnifiedAnalysis,
+} from '@/modules/unified-analysis/unified-analysis.service.js';
+import {
+  runUnifiedVerification,
+} from '@/modules/unified-verification/unified-verification.service.js';
 import {
   RetrievalBudget,
-  dedupeEvidenceByUrl,
 } from '@/modules/retrieval/retrieval.service.js';
-import { verifyClaim, type VerifyClaimOutput } from '@/modules/verification/verifier.service.js';
-import { mapConcurrent } from '@/shared/utils/async.js';
 import { newCorrelationId } from '@/shared/utils/correlation.js';
 import { scanForInjection } from '@/shared/utils/injection.js';
-import { normalizeText } from '@/shared/utils/text.js';
 
 export interface RunPipelineOptions {
   correlationId?: string;
@@ -45,7 +39,7 @@ export const runVerificationPipeline = async (
 
   log.info({ mode: input.mode, hasOverride: Boolean(input.domainOverride) }, 'Pipeline start');
 
-  // Defensive pre-scan: regex tripwires across both inputs. Cheap, deterministic.
+  // ── Pre-scan: injection tripwires (deterministic, no LLM) ─────────────
   const userScan = scanForInjection(input.userInput);
   const outputScan = scanForInjection(input.modelOutput);
   const preScanMatches = Array.from(new Set([...userScan.matchedIds, ...outputScan.matchedIds]));
@@ -56,72 +50,30 @@ export const runVerificationPipeline = async (
     log.warn({ preScanMatches }, 'Prompt-injection pre-scan flagged content');
   }
 
-  // ── Stage 1: Domain detection + Claim reconstruction (parallel) ──────────
-  // These are independent — domain detection doesn't need reconstruction and
-  // vice versa. Running them in parallel saves one full LLM round-trip.
-  const [detection, reconstruction] = await Promise.all([
-    stageTimer('domain_detection', () =>
-      detectDomain({
-        userInput: input.userInput,
-        modelOutput: input.modelOutput,
-        correlationId,
-        ...(input.domainOverride ? { override: input.domainOverride } : {}),
-      }),
-    ),
-    stageTimer('claim_reconstruction', () =>
-      reconstructClaim({
-        userInput: input.userInput,
-        modelOutput: input.modelOutput,
-        correlationId,
-      }),
-    ),
-  ]);
+  // ── LLM Call 1: Unified Analysis ─────────────────────────────────────
+  // Domain detection + Claim reconstruction + Claim decomposition
+  const analysis = await stageTimer('analysis', () =>
+    runUnifiedAnalysis({
+      userInput: input.userInput,
+      modelOutput: input.modelOutput,
+      correlationId,
+      ...(input.domainOverride ? { domainOverride: input.domainOverride } : {}),
+    }),
+  );
 
-  const reconstructionMeta = toReconstructionMeta(reconstruction);
-  if (reconstruction.reconstructed) {
-    warnings.push(
-      `Model output was fragmentary; reconstructed claim: "${reconstruction.effectiveOutput}"`,
-    );
-  }
-
-  // ── Stage 2: Decomposition + Compliance (parallel) ──────────────────────
-  // Decomposition receives the (possibly reconstructed) output.
-  // Compliance still checks the original raw output.
-  const [decomposeResult, compliance] = await Promise.all([
-    stageTimer('claim_decomposition', () =>
-      decomposeClaims({
-        userInput: input.userInput,
-        modelOutput: reconstruction.effectiveOutput,
-        correlationId,
-      }),
-    ),
-    stageTimer('compliance', () =>
-      runCompliance({
-        userInput: input.userInput,
-        modelOutput: input.modelOutput,
-        correlationId,
-      }),
-    ),
-  ]);
-
-  const { claims: rawClaims } = decomposeResult;
-  warnings.push(...decomposeResult.warnings);
-
-  // Mark claims as reconstructed when the output was rebuilt from a fragment.
-  const claims = reconstruction.reconstructed
-    ? rawClaims.map((c) => ({ ...c, reconstructed: true }))
-    : rawClaims;
+  const { claims, domain } = analysis;
+  warnings.push(...analysis.warnings);
 
   if (claims.length === 0) {
     log.warn('No claims produced; returning empty verdict set');
     timings.totalMs = Date.now() - startedAt;
     return {
       correlationId,
-      detectedDomain: detection.domain,
+      detectedDomain: domain,
       mode: input.mode,
       claims: [],
       verdicts: [],
-      compliance,
+      compliance: { safe: true, flags: [], reasoning: 'No claims to verify.' },
       overallStatus: 'INCONCLUSIVE',
       timings,
       warnings,
@@ -130,113 +82,53 @@ export const runVerificationPipeline = async (
         preScanMatches,
         llmSelfReports: 0,
       },
+      ...(analysis.reconstructionMeta ? { reconstruction: analysis.reconstructionMeta } : {}),
     };
   }
 
-  // Shared retrieval pool: at most RETRIEVAL_MAX_CALLS_PER_RUN Tavily calls across
-  // the entire run. Initial round seeds the pool from claim text; refinement only
-  // fires for claims that came back INCONCLUSIVE and only while budget remains.
-  const budget = new RetrievalBudget(env.RETRIEVAL_MAX_CALLS_PER_RUN);
-
+  // ── Tavily Retrieval (no LLM) ────────────────────────────────────────
+  const budget = new RetrievalBudget(1); // exactly 1 Tavily call
   let evidencePool: Evidence[] = [];
-  if (claims.length > 0) {
-    const seedQuery = buildSeedQuery(claims);
-    const seedOutcome = await budget.retrieve({
+
+  const seedQuery = buildSeedQuery(claims);
+  const seedOutcome = await stageTimer('retrieval', async () => {
+    const result = await budget.retrieve({
       query: seedQuery,
       mode: input.mode,
-      domain: detection.domain,
+      domain,
       correlationId,
     });
-    evidencePool = seedOutcome?.evidence ?? [];
-    log.info(
-      {
-        seedQuery,
-        evidenceCount: evidencePool.length,
-        budgetUsed: budget.callsUsed,
-        budgetRemaining: budget.remaining,
-      },
-      'Initial retrieval complete',
-    );
-  }
+    return result;
+  });
+  evidencePool = seedOutcome?.evidence ?? [];
 
-  const round1Outputs = await stageTimer('claim_verification', async () =>
-    runRound(claims, evidencePool, 1, detection.domain, correlationId),
+  log.info(
+    { seedQuery, evidenceCount: evidencePool.length },
+    'Retrieval complete',
   );
 
-  // Round 2: only fires if some claims are INCONCLUSIVE and the budget still has room.
-  // The verifier's refinedQuery suggestions are pooled, deduplicated, and the most
-  // distinct ones are issued until the budget is exhausted.
-  let finalOutputs = round1Outputs;
-  const inconclusive = round1Outputs.filter(
-    (o) => o.verdict.status === 'INCONCLUSIVE' && o.refinedQuery,
+  // ── LLM Call 2: Unified Verification + Compliance ────────────────────
+  const verification = await stageTimer('verification', () =>
+    runUnifiedVerification({
+      claims,
+      evidencePool,
+      userInput: input.userInput,
+      modelOutput: input.modelOutput,
+      domain,
+      correlationId,
+    }),
   );
 
-  if (inconclusive.length > 0 && budget.remaining > 0) {
-    const refinedQueries = pickRefinedQueries(
-      inconclusive.map((o) => o.refinedQuery as string),
-      budget.remaining,
-    );
+  warnings.push(...verification.warnings);
 
-    for (const q of refinedQueries) {
-      const more = await budget.retrieve({
-        query: q,
-        mode: input.mode,
-        domain: detection.domain,
-        correlationId,
-      });
-      if (more) evidencePool = dedupeEvidenceByUrl([...evidencePool, ...more.evidence]);
-    }
-
-    log.info(
-      {
-        refinedQueries,
-        poolSize: evidencePool.length,
-        budgetUsed: budget.callsUsed,
-        budgetRemaining: budget.remaining,
-      },
-      'Refinement retrieval complete',
-    );
-
-    const claimsToRerun = inconclusive
-      .map((o) => claims.find((c) => c.id === o.verdict.claimId))
-      .filter((c): c is AtomicClaim => c !== undefined);
-
-    const round2Outputs = await stageTimer('claim_verification', async () =>
-      runRound(claimsToRerun, evidencePool, 2, detection.domain, correlationId),
-    );
-
-    const round2ById = new Map(round2Outputs.map((o) => [o.verdict.claimId, o]));
-    finalOutputs = round1Outputs.map((o) => round2ById.get(o.verdict.claimId) ?? o);
-  } else if (inconclusive.length > 0) {
-    log.info(
-      { inconclusive: inconclusive.length },
-      'INCONCLUSIVE claims present but retrieval budget exhausted; skipping refinement',
-    );
-  }
-
-  if (budget.callsUsed >= budget.max) {
-    warnings.push(
-      `Retrieval budget exhausted (${budget.callsUsed}/${budget.max} Tavily calls used).`,
-    );
-  }
-
-  const claimOutputs = finalOutputs;
-
-  const llmSelfReports = claimOutputs.filter((o) => o.injectionFlagged).length;
-  const tagMissingCount = claimOutputs.filter((o) => o.tagMissing).length;
-  if (tagMissingCount > 0) {
-    warnings.push(
-      `${tagMissingCount} claim(s) produced a FALSE verdict without hallucinationTypes despite explicit prompt requirement.`,
-    );
-  }
-  const rawVerdicts = claimOutputs.map((o) => o.verdict);
-
-  // Deterministic post-hoc consistency check: if a verdict claims VERIFIED/FALSE
-  // but the evidence stance distribution disagrees, downgrade to INCONCLUSIVE.
-  const verdicts = rawVerdicts.map((v) => applyStanceSanityCheck(v, warnings));
+  // ── Post-processing ──────────────────────────────────────────────────
+  // Apply stance sanity checks
+  const verdicts = verification.verdicts.map((v) => applyStanceSanityCheck(v, warnings));
 
   const overallStatus = computeOverallStatus(verdicts);
   const correctedOutput = buildCorrectedOutput(claims, verdicts, input.modelOutput);
+
+  const llmSelfReports = verification.llmSelfReports;
 
   timings.totalMs = Date.now() - startedAt;
   log.info(
@@ -261,25 +153,28 @@ export const runVerificationPipeline = async (
 
   return {
     correlationId,
-    detectedDomain: detection.domain,
+    detectedDomain: domain,
     mode: input.mode,
     claims,
     verdicts,
-    compliance,
+    compliance: verification.compliance,
     overallStatus,
     ...(correctedOutput ? { correctedOutput } : {}),
     timings,
     warnings,
     injection,
-    ...(reconstructionMeta ? { reconstruction: reconstructionMeta } : {}),
+    ...(analysis.reconstructionMeta ? { reconstruction: analysis.reconstructionMeta } : {}),
   };
 };
 
+// ---------------------------------------------------------------------------
+// Helpers (kept from the original orchestrator)
+// ---------------------------------------------------------------------------
+
 /**
- * Builds the seed Tavily query for round 1. Joins the most-distinctive
- * claim texts (longest first, capped) so a single search covers the
- * topics the model actually asserted, even when the user input is on a
- * different topic (e.g. prompt-injection or off-topic responses).
+ * Builds the seed Tavily query. Joins the most-distinctive claim texts
+ * (longest first, capped) so a single search covers the topics the model
+ * actually asserted.
  */
 const buildSeedQuery = (claims: AtomicClaim[]): string => {
   const MAX_LEN = 380;
@@ -303,81 +198,7 @@ const buildSeedQuery = (claims: AtomicClaim[]): string => {
 };
 
 /**
- * Deduplicates the verifier-suggested refinement queries and picks up to `max`
- * distinct ones. Distinctness uses normalized-token Jaccard so near-identical
- * suggestions don't burn separate Tavily calls.
- */
-const pickRefinedQueries = (queries: string[], max: number): string[] => {
-  const picked: Array<{ raw: string; tokens: Set<string> }> = [];
-  for (const q of queries) {
-    if (picked.length >= max) break;
-    const normalized = normalizeText(q);
-    if (normalized.length < 4) continue;
-    const tokens = new Set(normalized.split(' '));
-    const duplicate = picked.some((p) => jaccard(p.tokens, tokens) >= 0.7);
-    if (duplicate) continue;
-    picked.push({ raw: q, tokens });
-  }
-  return picked.map((p) => p.raw);
-};
-
-const jaccard = (a: Set<string>, b: Set<string>): number => {
-  if (a.size === 0 || b.size === 0) return 0;
-  let intersection = 0;
-  for (const t of a) if (b.has(t)) intersection += 1;
-  const union = a.size + b.size - intersection;
-  return union === 0 ? 0 : intersection / union;
-};
-
-const runRound = async (
-  claims: AtomicClaim[],
-  evidencePool: Evidence[],
-  iteration: number,
-  domain: Domain,
-  correlationId: string,
-): Promise<VerifyClaimOutput[]> => {
-  const log = rootLogger.child({ module: 'pipeline', correlationId, iteration });
-  return mapConcurrent<AtomicClaim, VerifyClaimOutput>(
-    claims,
-    env.CLAIM_CONCURRENCY,
-    async (claim) => {
-      try {
-        return await verifyClaim({
-          claim,
-          domain,
-          evidencePool,
-          iteration,
-          correlationId,
-        });
-      } catch (err) {
-        log.warn(
-          { err, claimId: claim.id, iteration },
-          'Per-claim verification failed; marking INCONCLUSIVE',
-        );
-        return {
-          verdict: {
-            claimId: claim.id,
-            status: 'INCONCLUSIVE',
-            confidence: 0,
-            hallucinationTypes: [],
-            reasoning: `Verification failed: ${asMessage(err)}`,
-            evidenceUsed: [],
-            iterations: iteration,
-          },
-          injectionFlagged: false,
-          tagMissing: false,
-        };
-      }
-    },
-  );
-};
-
-/**
- * Reconciles the verifier's verdict against its own per-evidence stance annotations:
- * - VERIFIED but stance is majority-contradicts → downgrade to INCONCLUSIVE.
- * - FALSE but stance is majority-supports → downgrade to INCONCLUSIVE.
- * - INCONCLUSIVE but stance shows ≥2 contradicts and zero supports → promote to FALSE.
- *   (The LLM saw the contradiction and tagged it; refusing to call FALSE was excess hedging.)
+ * Reconciles the verifier's verdict against its own per-evidence stance annotations.
  */
 const applyStanceSanityCheck = (verdict: ClaimVerdict, warnings: string[]): ClaimVerdict => {
   if (verdict.evidenceUsed.length === 0) return verdict;
@@ -418,9 +239,7 @@ const applyStanceSanityCheck = (verdict: ClaimVerdict, warnings: string[]): Clai
 };
 
 /**
- * Overall status priority: any FALSE → FALSE (one falsehood ruins the response);
- * else any INCONCLUSIVE → INCONCLUSIVE (incomplete signal); else VERIFIED.
- * If we somehow get an empty verdict list, INCONCLUSIVE is the safe default.
+ * Overall status priority: any FALSE → FALSE; else any INCONCLUSIVE → INCONCLUSIVE; else VERIFIED.
  */
 const computeOverallStatus = (verdicts: ClaimVerdict[]): VerdictStatus => {
   if (verdicts.length === 0) return 'INCONCLUSIVE';
@@ -455,11 +274,9 @@ const buildCorrectedOutput = (
   return lines.join('\n');
 };
 
-const asMessage = (err: unknown): string => {
-  if (err instanceof AppError) return `${err.code}: ${err.message}`;
-  if (err instanceof Error) return err.message;
-  return String(err);
-};
+// ---------------------------------------------------------------------------
+// Stage timer
+// ---------------------------------------------------------------------------
 
 interface StageTimer {
   <T>(stage: PipelineStage, fn: () => Promise<T>): Promise<T>;

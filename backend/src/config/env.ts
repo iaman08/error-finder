@@ -40,14 +40,12 @@ const envSchema = z.object({
   TAVILY_API_KEY: z.string().min(1, 'TAVILY_API_KEY is required'),
   TAVILY_REQUEST_TIMEOUT_MS: intString(20_000),
 
-  MAX_VERIFICATION_ITERATIONS: intString(2),
   MAX_CLAIMS_PER_RUN: intString(30),
   MAX_EVIDENCE_PER_VERIFICATION: intString(12),
   RETRIEVAL_RESULTS_STANDARD: intString(8),
   RETRIEVAL_RESULTS_PROFESSIONAL: intString(10),
-  /** Hard cap on Tavily calls per /verify. Initial round consumes 1; remainder is for refinement. */
-  RETRIEVAL_MAX_CALLS_PER_RUN: intString(3),
-  CLAIM_CONCURRENCY: intString(4),
+  /** Hard cap on Tavily calls per /verify. The 2-call pipeline uses exactly 1 by default. */
+  RETRIEVAL_MAX_CALLS_PER_RUN: intString(1),
 
   /** ISO date (YYYY-MM-DD). Empty/missing falls back to the system clock at run time. */
   TODAY_DATE_OVERRIDE: z

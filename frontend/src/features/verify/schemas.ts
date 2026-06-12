@@ -15,11 +15,9 @@ export const HALLUCINATION_TYPES = [
 ] as const;
 export const EVIDENCE_STANCES = ['supports', 'contradicts', 'neutral'] as const;
 export const PIPELINE_STAGES = [
-  'domain_detection',
-  'retrieval_initial',
-  'claim_decomposition',
-  'claim_verification',
-  'compliance',
+  'analysis',
+  'retrieval',
+  'verification',
 ] as const;
 
 export type Domain = (typeof DOMAINS)[number];
